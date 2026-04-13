@@ -5,7 +5,7 @@ import re
 import numpy as np
 
 
-Table_B1 = pd.read_excel('IPT_Tabel_B1.xlsx').fillna(0)
+Table_B1 = pd.read_excel('..\data\IPT_Tabel_B1.xlsx').fillna(0)
 Table_B1 = Table_B1.apply(lambda col: col.str.strip() if col.dtype == "object" else col) #remove spaces
 
 # make numerical columns float
@@ -54,7 +54,7 @@ Table_B1 = Table_B1.drop(['Hf° [kJ/mol]', 'Hc° [kJ/mol]'], axis=1)
 
 Table_B1 
 
-Table_B2 = pd.read_excel('IPT_Tabel_B2.xlsx')
+Table_B2 = pd.read_excel('..\data\IPT_Tabel_B2.xlsx')
 Table_B2 = Table_B2.apply(lambda col: col.str.strip()) #remove spaces
 Table_B2 = Table_B2.fillna(0) # fill NaN w 0
 
@@ -209,11 +209,16 @@ path = Path(water, T_end, P_end, F_end)
 path.build_path()
 print(path.total_enthalpy()) 
 
+
+### STREAMLIT ###
+
 import streamlit as st
 
 st.title("Thermodynamic Path Builder")
 
-name = st.selectbox("Molecule", ["H2O", "CO2"])
+all_molecules = np.array(Table_B2["Formule"])
+
+name = st.selectbox("Molecule", all_molecules)
 T_start = st.number_input("Start Temperature (°C)", value=25)
 T_end = st.number_input("End Temperature (°C)", value=100)
 
