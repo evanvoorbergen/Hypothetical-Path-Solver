@@ -233,7 +233,7 @@ class Path:
 import streamlit as st
 import streamlit.components.v1 as components
 
-st.title("Thermodynamic Path Builder")
+st.title("Hypothetical Path Builder")
 
 all_molecules = np.array(Table_B2["Formule"])
 
