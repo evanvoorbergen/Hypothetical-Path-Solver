@@ -230,31 +230,6 @@ class Path:
 
 ### STREAMLIT ###
 
-# import streamlit as st
-
-# st.title("Thermodynamic Path Builder")
-
-# all_molecules = np.array(Table_B2["Formule"])
-
-# name = st.selectbox("Molecule", all_molecules)
-# T_start = st.number_input("Start Temperature (°C)", value=25)
-# T_end = st.number_input("End Temperature (°C)", value=100)
-
-# F_start = st.selectbox("Start Phase", ["s", "l", "g"])
-# F_end = st.selectbox("End Phase", ["s", "l", "g"])
-
-# if st.button("Calculate Path"):
-#     mol = Molecule(name, T_start, 1, F_start, Table_B1, Table_B2)
-#     path = Path(mol, T_end, 1, F_end)
-#     path.build_path()
-
-#     st.write("Total ΔH:", path.total_enthalpy())
-
-#     for step in path.steps:
-#         st.write(step.dH)
-        
-### STREAMLIT ###
-
 import streamlit as st
 import streamlit.components.v1 as components
 
@@ -271,42 +246,68 @@ F_end = st.selectbox("End Phase", ["s", "l", "g"])
 
 PHASE_LABELS = {"s": "solid", "c": "solid", "l": "liquid", "g": "gas"}
 
-def get_step_label(step):
-    """Determine the thermodynamic label for a step's arrow."""
+def get_step_label(step, Table_B2):
     T_changed = step.current_T != step.new_T
     F_changed = step.current_F != step.new_F
 
     if T_changed and not F_changed:
         phase = step.current_F
+        mol_name = step.molecule.name
+        F = step.molecule.F
+
+        row = Table_B2[
+            ((Table_B2["Stofnaam (NL)"] == mol_name) |
+             (Table_B2["Stofnaam (EN)"] == mol_name) |
+             (Table_B2["Formule"] == mol_name)) &
+            (Table_B2["Staat"] == F)
+        ].iloc[0]
+
+        a = row['a (•10^3)'] * 1e-3
+        b = row['b (•10^5)'] * 1e-5
+        c = row['c (•10^8)'] * 1e-8
+        d = row['d (•10^12)'] * 1e-12
+        vorm = row['Vorm']
+
+        if vorm == 1:
+            cp_str = f"{a:.4f} + {b:.4f}T + {c:.4f}T² + {d:.4f}T³"
+        elif vorm == 2:
+            cp_str = f"{a:.4f} + {b:.4f}T + {c:.4f}T⁻²"
+        else:
+            cp_str = "Cp"
+
+        T1, T2 = step.current_T, step.new_T
+
         if phase in ("s", "c"):
-            return "Cp,s·dT"
+            short = "Cp,s·dT"
         elif phase == "l":
-            return "Cp,l·dT"
-        elif phase == "g":
-            return "Cp,g·dT"
+            short = "Cp,l·dT"
+        else:
+            short = "Cp,g·dT"
+
+        integral = f"∫{T1:.0f}→{T2:.0f} ({cp_str}) dT"
+        return short, integral
 
     if F_changed and not T_changed:
         solid = ("s", "c")
         if step.current_F in solid and step.new_F == "l":
-            return "ΔH_fus"
+            return "ΔH_fus", None
         elif step.current_F == "l" and step.new_F in solid:
-            return "−ΔH_fus"
+            return "−ΔH_fus", None
         elif step.current_F == "l" and step.new_F == "g":
-            return "ΔH_vap"
+            return "ΔH_vap", None
         elif step.current_F == "g" and step.new_F == "l":
-            return "−ΔH_vap"
+            return "−ΔH_vap", None
 
-    return "ΔH"
+    return "ΔH", None
+
 
 def build_diagram_html(molecule_name, steps):
     BOX_W, BOX_H = 160, 80
     ARROW_W = 120
-    STEP_W = BOX_W + ARROW_W
     TOTAL_BOXES = len(steps) + 1
     SVG_W = TOTAL_BOXES * BOX_W + len(steps) * ARROW_W + 40
     SVG_H = 200
 
-    # Collect all states (box before each step + final box)
     states = []
     for step in steps:
         states.append((step.current_T, step.current_F))
@@ -315,10 +316,10 @@ def build_diagram_html(molecule_name, steps):
 
     def phase_color(f):
         return {
-            "s": ("#dbeafe", "#1e40af"),   # blue: solid
+            "s": ("#dbeafe", "#1e40af"),
             "c": ("#dbeafe", "#1e40af"),
-            "l": ("#d1fae5", "#065f46"),   # green: liquid
-            "g": ("#fef3c7", "#92400e"),   # amber: gas
+            "l": ("#d1fae5", "#065f46"),
+            "g": ("#fef3c7", "#92400e"),
         }.get(f, ("#f3f4f6", "#374151"))
 
     svg_parts = [
@@ -331,54 +332,46 @@ def build_diagram_html(molecule_name, steps):
         '</marker></defs>',
     ]
 
-    CY = SVG_H // 2  # vertical center
+    CY = SVG_H // 2
     x = 20
 
     for i, (T, F) in enumerate(states):
         fill, text_col = phase_color(F)
         phase_str = PHASE_LABELS.get(F, F)
 
-        # Box
         svg_parts.append(
             f'<rect x="{x}" y="{CY - BOX_H//2}" width="{BOX_W}" height="{BOX_H}" '
             f'rx="10" fill="{fill}" stroke="{text_col}" stroke-width="1.2"/>'
         )
-        # Molecule name
         svg_parts.append(
             f'<text x="{x + BOX_W//2}" y="{CY - 14}" text-anchor="middle" '
             f'font-size="15" font-weight="600" fill="{text_col}">{molecule_name}</text>'
         )
-        # Temperature
         svg_parts.append(
             f'<text x="{x + BOX_W//2}" y="{CY + 6}" text-anchor="middle" '
             f'font-size="13" fill="{text_col}">T = {T:.1f} °C</text>'
         )
-        # Phase
         svg_parts.append(
             f'<text x="{x + BOX_W//2}" y="{CY + 22}" text-anchor="middle" '
             f'font-size="12" fill="{text_col}">({phase_str})</text>'
         )
 
-        # Arrow to next box (if not last state)
         if i < len(steps):
             step = steps[i]
-            label = get_step_label(step)
+            short, _ = get_step_label(step, Table_B2)
             dH_val = step.dH
             sign = "+" if dH_val >= 0 else ""
             ax1 = x + BOX_W
             ax2 = ax1 + ARROW_W
 
-            # Arrow line
             svg_parts.append(
                 f'<line x1="{ax1}" y1="{CY}" x2="{ax2 - 6}" y2="{CY}" '
                 f'stroke="#6b7280" stroke-width="1.5" marker-end="url(#arr)"/>'
             )
-            # Step type label (above arrow)
             svg_parts.append(
                 f'<text x="{(ax1 + ax2)//2}" y="{CY - 14}" text-anchor="middle" '
-                f'font-size="12" font-weight="600" fill="#374151">{label}</text>'
+                f'font-size="12" font-weight="600" fill="#374151">{short}</text>'
             )
-            # ΔH value (below arrow)
             svg_parts.append(
                 f'<text x="{(ax1 + ax2)//2}" y="{CY + 18}" text-anchor="middle" '
                 f'font-size="11" fill="#6b7280">{sign}{dH_val:.2f} kJ/mol</text>'
@@ -389,12 +382,12 @@ def build_diagram_html(molecule_name, steps):
     svg_parts.append('</svg>')
     svg_html = "\n".join(svg_parts)
 
-    # Wrap in scrollable div in case diagram is wide
     return f"""
     <div style="overflow-x: auto; padding: 12px 0;">
       {svg_html}
     </div>
     """
+
 
 if st.button("Calculate Path"):
     try:
@@ -408,20 +401,22 @@ if st.button("Calculate Path"):
             html = build_diagram_html(name, path.steps)
             components.html(html, height=220, scrolling=True)
 
-            # Also show breakdown table
             st.subheader("Step breakdown")
             for i, step in enumerate(path.steps):
-                label = get_step_label(step)
+                short, integral = get_step_label(step, Table_B2)
                 phase_before = PHASE_LABELS.get(step.current_F, step.current_F)
                 phase_after  = PHASE_LABELS.get(step.new_F, step.new_F)
+                integral_str = f" | {integral}" if integral else ""
                 st.write(
-                    f"**Step {i+1}** ({label}): "
+                    f"**Step {i+1}** ({short}): "
                     f"{step.current_T:.1f}°C {phase_before} → "
                     f"{step.new_T:.1f}°C {phase_after} | "
                     f"ΔH = {step.dH:.4f} kJ/mol"
+                    f"{integral_str}"
                 )
         else:
             st.info("No steps generated — start and end states may be identical.")
 
     except ValueError as e:
         st.error(str(e))
+        
