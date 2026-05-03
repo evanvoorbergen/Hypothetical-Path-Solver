@@ -251,15 +251,17 @@ def get_step_label(step, Table_B2):
     F_changed = step.current_F != step.new_F
 
     if T_changed and not F_changed:
-        phase = step.current_F
+        phase = step.current_F  # phase during this step
         mol_name = step.molecule.name
-        F = step.molecule.F
+
+        # Use current_F for lookup, not molecule.F
+        lookup_phase = 'c' if phase in ('s', 'c') else phase
 
         row = Table_B2[
             ((Table_B2["Stofnaam (NL)"] == mol_name) |
              (Table_B2["Stofnaam (EN)"] == mol_name) |
              (Table_B2["Formule"] == mol_name)) &
-            (Table_B2["Staat"] == F)
+            (Table_B2["Staat"] == lookup_phase)
         ].iloc[0]
 
         a = row['a (•10^3)'] * 1e-3
@@ -419,4 +421,3 @@ if st.button("Calculate Path"):
 
     except ValueError as e:
         st.error(str(e))
-        
