@@ -264,18 +264,23 @@ def get_step_label(step, Table_B2):
             (Table_B2["Staat"] == lookup_phase)
         ].iloc[0]
 
-        a = row['a (•10^3)'] * 1e-3
-        b = row['b (•10^5)'] * 1e-5
-        c = row['c (•10^8)'] * 1e-8
-        d = row['d (•10^12)'] * 1e-12
+       
         vorm = row['Vorm']
 
+        a_raw = row['a (•10^3)']
+        b_raw = row['b (•10^5)']
+        c_raw = row['c (•10^8)']
+        d_raw = row['d (•10^12)']
+        
+
         if vorm == 1:
-            cp_str = f"{a:.4f} + {b:.4f}T + {c:.4f}T² + {d:.4f}T³"
+            cp_str = f"{a_raw}·10⁻³ + {b_raw}·10⁻⁵T + {c_raw}·10⁻⁸T² + {d_raw}·10⁻¹²T³"
         elif vorm == 2:
-            cp_str = f"{a:.4f} + {b:.4f}T + {c:.4f}T⁻²"
+            cp_str = f"{a_raw}·10⁻³ + {b_raw}·10⁻⁵T + {c_raw}·10⁻⁸T⁻²"
         else:
             cp_str = "Cp"
+
+    
 
         T1, T2 = step.current_T, step.new_T
 
