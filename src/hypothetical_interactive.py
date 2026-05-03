@@ -4,7 +4,7 @@ from scipy.integrate import quad
 import numpy as np
 
 
-Table_B1 = pd.read_excel(r'..\data\IPT_Tabel_B1.xlsx').fillna(0)
+Table_B1 = pd.read_excel(r'../data/IPT_Tabel_B1.xlsx').fillna(0)
 Table_B1 = Table_B1.apply(
     lambda col: col.str.strip() if col.dtype == "object" else col
     ) #remove spaces
@@ -61,7 +61,7 @@ for row in range(len(Table_B1)):
 Table_B1 = Table_B1.drop(['Hf° [kJ/mol]', 'Hc° [kJ/mol]'], axis=1)
 
 
-Table_B2 = pd.read_excel(r"..\data\IPT_Tabel_B2.xlsx")
+Table_B2 = pd.read_excel(r"../data/IPT_Tabel_B2.xlsx")
 Table_B2 = Table_B2.apply(lambda col: col.str.strip()) #remove spaces # if col.dtype == str else col
 Table_B2 = Table_B2.fillna(0) # fill NaN w 0
 
