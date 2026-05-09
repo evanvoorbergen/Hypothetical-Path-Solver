@@ -96,7 +96,7 @@ class Molecule:
         try:
             self.Table_B2 = Table_B2[((Table_B2["Stofnaam (NL)"] == self.name) | (Table_B2["Stofnaam (EN)"] == self.name) | (Table_B2["Formule"] == self.name)) & (Table_B2["Staat"] == self.F)].iloc[0]         # Selects row of Table B2 for the correct compound and phase
         except:
-            raise ValueError("There is no defined heat capacity function for this molecule.")
+            raise ValueError(f"There is no defined heat capacity function for this molecule's start phase: {self.F}.")
 
     ### Temperature Change
     
@@ -125,7 +125,7 @@ class Molecule:
             def H(T):
                 return a*T + (b/2)*T**2 - c/T                       # Integrated form of a + b*T + c*T**(-2)
         else:
-            raise ValueError("Cp function is not of Form 1 or Form 2")
+            raise ValueError("Heat capacity function is not of Form 1 or Form 2")
 
         # Calculate enthalpy change
         dH = (H(T2) - H(T1))  # kJ/mol
@@ -227,7 +227,7 @@ class Path:
         # Go to Tmelt and Phase Change to Liquid
         if self.molecule.F in ['c', 's'] and self.end_F in ['l', 'g']:
             if not self.molecule.has_cp('l'):
-                raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
+                raise ValueError(f"No heat capacity defined for {self.molecule.name} in liquid phase.")
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tm [°C]']))
             self.add_step(Step(self.molecule, new_F = 'l'))
 
@@ -239,7 +239,7 @@ class Path:
         # Go to Tvap and Phase Change to Liquid if Ending in Solid
         if self.molecule.F == 'g' and self.end_F in ['c', 's']:
             if not self.molecule.has_cp('l'):
-                raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
+                raise ValueError(f"No heat capacity defined for {self.molecule.name} in liquid phase.")
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tb [°C]']))
             self.add_step(Step(self.molecule, new_F = 'l'))
 
@@ -248,11 +248,11 @@ class Path:
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tb [°C]']))
             if self.molecule.F == 'l' and self.end_F == 'g':
                 if not self.molecule.has_cp('g'):
-                    raise ValueError(f"No Cp defined for {self.molecule.name} in gas phase.")
+                    raise ValueError(f"No heat capacity defined for {self.molecule.name} in gas phase.")
                 self.add_step(Step(self.molecule, new_F='g'))
             elif self.molecule.F == 'g' and self.end_F == 'l':
                 if not self.molecule.has_cp('l'):
-                    raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
+                    raise ValueError(f"No heat capacity defined for {self.molecule.name} in liquid phase.")
                 self.add_step(Step(self.molecule, new_F='l'))
     
         # Final Temp Change
@@ -260,7 +260,16 @@ class Path:
             self.add_step(Step(self.molecule, new_T = self.end_T))
 
 
-
+# Heat of Formation Addition
+def build_hf_path(name, hf_value, hf_phase, end_T, end_F, Table_B1, Table_B2):
+    steps_desc = [f"Hf°({hf_phase}) = {hf_value} kJ/mol at 25°C"]
+    
+    mol = Molecule(name, 25, 1, hf_phase, Table_B1, Table_B2)
+    path = Path(mol, end_T, 1, end_F)
+    path.build_path()
+    
+    total = hf_value + path.total_enthalpy()
+    return hf_value, path, total
 
 ### STREAMLIT ###
 
@@ -269,11 +278,27 @@ st.set_page_config(layout="wide")
 st.title("Hypothetical Path Builder")
 
 
-b2_formule = np.array(Table_B2["Formule"])
-b1_formule = np.array(Table_B1["Formule"])
-all_molecules = np.unique(np.concatenate([b1_formule, b2_formule]))
+# b2_formule = np.array(Table_B2["Formule"])
+# b1_formule = np.array(Table_B1["Formule"])
+# all_molecules = np.unique(np.concatenate([b1_formule, b2_formule]))
 
-name = st.selectbox("Molecule", all_molecules)
+# name = st.selectbox("Molecule", all_molecules)
+
+search_by = st.radio("Search by", ["Name (EN)", "Formula", "Name (NL)"], horizontal=True)
+
+if search_by == "Name (NL)":
+    b1_options = Table_B1["Stofnaam (NL)"]
+    b2_options = Table_B2["Stofnaam (NL)"]
+elif search_by == "Name (EN)":
+    b1_options = Table_B1["Stofnaam (EN)"]
+    b2_options = Table_B2["Stofnaam (EN)"]
+else:
+    b1_options = Table_B1["Formule"]
+    b2_options = Table_B2["Formule"]
+
+options = np.sort(pd.concat([b1_options, b2_options]).replace("0", np.nan).dropna().unique())
+name = st.selectbox("Molecule", options)
+
 T_start = st.number_input("Start Temperature (°C)", value=25)
 T_end = st.number_input("End Temperature (°C)", value=100)
 
@@ -432,8 +457,15 @@ def build_diagram_html(molecule_name, steps):
     </div>
     """
 
+col1, col2, col3 = st.columns(3)
+with col1:
+    calc = st.button("Calculate Path")
+with col2:
+    calc_hf_l = st.button("Calculate dH from Hf°(l)")
+with col3:
+    calc_hf_g = st.button("Calculate dH from Hf°(g)")
 
-if st.button("Calculate Path"):
+if calc:
     try:
         mol = Molecule(name, T_start, 1, F_start, Table_B1, Table_B2)
         path = Path(mol, T_end, 1, F_end)
@@ -460,7 +492,48 @@ if st.button("Calculate Path"):
                 )
         else:
             st.info("No steps generated — start and end states may be identical.")
-
     except ValueError as e:
         st.error(str(e))
 
+for btn, phase_key, label in [
+    (calc_hf_l, 'l', 'l'),
+    (calc_hf_g, 'g', 'g'),
+]:
+    if btn:
+        try:
+            mol_check = Molecule(name, T_end, 1, F_end, Table_B1, Table_B2)
+            hf_col = f"Hf° ({phase_key}) [kJ/mol]"
+            hf_value = mol_check.Table_B1.get(hf_col, None)
+
+            if hf_value is None or pd.isna(hf_value) or hf_value == 0:
+                st.error(f"No Hf°({label}) defined for {name}.")
+            else:
+                hf_val, path, total = build_hf_path(name, hf_value, phase_key, T_end, F_end, Table_B1, Table_B2)
+
+                st.write(f"**Hf°({label}):** {hf_val:.4f} kJ/mol")
+                st.write(f"**ΔH (path):** {path.total_enthalpy():.4f} kJ/mol")
+                st.write(f"**Total H:** {total:.4f} kJ/mol")
+
+                if path.steps:
+                    html = build_diagram_html(name, path.steps)
+                    st.iframe(html, height=220)
+
+                    st.subheader("Step breakdown")
+                    st.write(f"**Step 0 (Hf°):** elements → molecule at temp: 25°C , phase: {label} | ΔH = {hf_val:.4f} kJ/mol")
+                    for i, step in enumerate(path.steps):
+                        short, integral = get_step_label(step, Table_B2)
+                        phase_before = PHASE_LABELS.get(step.current_F, step.current_F)
+                        phase_after  = PHASE_LABELS.get(step.new_F, step.new_F)
+                        integral_str = f" | {integral}" if integral else ""
+                        st.write(
+                            f"**Step {i+1}** ({short}): "
+                            f"{step.current_T:.1f}°C {phase_before} → "
+                            f"{step.new_T:.1f}°C {phase_after} | "
+                            f"ΔH = {step.dH:.4f} kJ/mol"
+                            f"{integral_str}"
+                        )
+                else:
+                    st.write("No additional steps — target is already 25°C in the reference phase.")
+
+        except ValueError as e:
+            st.error(str(e))
