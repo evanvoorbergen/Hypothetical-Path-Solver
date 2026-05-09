@@ -1,21 +1,21 @@
 import re
 import os
 import pandas as pd
-from scipy.integrate import quad
 import numpy as np
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, '..', 'data')
 
-Table_B1 = pd.read_excel(os.path.join(DATA_DIR, 'IPT_Tabel_B1.xlsx')).fillna(0)
+Table_B1 = pd.read_excel(os.path.join(DATA_DIR, 'IPT_Tabel_B1.xlsx'))
 
-
+#remove spaces
 Table_B1 = Table_B1.apply(
-    lambda col: col.str.strip() if col.dtype == "object" else col
-    ) #remove spaces
+    lambda col: col.astype(str).str.strip().str.replace('\xa0', '', regex=False)
+)
+
 
 # make numerical columns float
-num_cols_B1 = ["Molaire massa [g/mol]", 
+num_cols_B1 = ["Molaire massa [g/mol]",
                "SG (20°/4°)", 
                "Tm [°C]", 
                "Hm(Tm) [kJ/mol]", 
@@ -24,7 +24,8 @@ num_cols_B1 = ["Molaire massa [g/mol]",
                "Tc [K]", 
                "Pc [atm]"
                ]
-Table_B1[num_cols_B1] = Table_B1[num_cols_B1].apply(pd.to_numeric, errors="coerce")
+
+Table_B1[num_cols_B1] = Table_B1[num_cols_B1].replace("-", np.nan).apply(pd.to_numeric, errors="coerce").fillna(0)
 
 # make Hc string
 Table_B1["Hc° [kJ/mol]"] = Table_B1["Hc° [kJ/mol]"].replace("-", np.nan)
@@ -34,6 +35,8 @@ Table_B1["Hc° [kJ/mol]"] = Table_B1["Hc° [kJ/mol]"].replace("-", np.nan)
 # Split Heat of Formation Values for Different Phases
 for row in range(len(Table_B1)):
     string = Table_B1["Hf° [kJ/mol]"].iloc[row]
+    if pd.isna(string):
+        continue
     string = string.replace('`', '')
     splits = string.split()
     for i in range(len(splits)):
@@ -76,7 +79,6 @@ Table_B2[num_cols_B2] = Table_B2[num_cols_B2].apply(pd.to_numeric, errors="coerc
 
 Table_B2 = Table_B2.fillna(0) # fill NaN w 0
 
-
 class Molecule:
     def __init__(self, name, T, P, F, Table_B1, Table_B2):
         self.name = name
@@ -90,6 +92,7 @@ class Molecule:
             self.F = F
 
         self.Table_B1 = Table_B1[(Table_B1["Stofnaam (NL)"] == self.name) | (Table_B1["Stofnaam (EN)"] == self.name) | (Table_B1["Formule"] == self.name)].iloc[0]       # Selects row of Table B1 for the correct compound
+        self.Table_B2_full = Table_B2
         try:
             self.Table_B2 = Table_B2[((Table_B2["Stofnaam (NL)"] == self.name) | (Table_B2["Stofnaam (EN)"] == self.name) | (Table_B2["Formule"] == self.name)) & (Table_B2["Staat"] == self.F)].iloc[0]         # Selects row of Table B2 for the correct compound and phase
         except:
@@ -156,7 +159,29 @@ class Molecule:
 
         # Adjust to new phase
         self.F = new_F
+
+        lookup_phase = 'c' if new_F in ('s', 'c') else new_F
+        try:
+            self.Table_B2 = self.Table_B2_full[
+                ((self.Table_B2_full["Stofnaam (NL)"] == self.name) |
+                (self.Table_B2_full["Stofnaam (EN)"] == self.name) |
+                (self.Table_B2_full["Formule"] == self.name)) &
+                (self.Table_B2_full["Staat"] == lookup_phase)
+            ].iloc[0]
+        except IndexError:
+            pass
+
         return dH
+    
+    def has_cp(self, phase):
+        lookup_phase = 'c' if phase in ('s', 'c') else phase
+        match = self.Table_B2_full[
+            ((self.Table_B2_full["Stofnaam (NL)"] == self.name) |
+            (self.Table_B2_full["Stofnaam (EN)"] == self.name) |
+            (self.Table_B2_full["Formule"] == self.name)) &
+            (self.Table_B2_full["Staat"] == lookup_phase)
+        ]
+        return not match.empty
     
 
 class Step:
@@ -167,14 +192,14 @@ class Step:
         self.current_P = molecule.P
         self.current_F = molecule.F
 
-        self.new_T = new_T or molecule.T
-        self.new_P = new_P or molecule.P
-        self.new_F = new_F or molecule.F
+        self.new_T = new_T if new_T is not None else molecule.T
+        self.new_P = new_P if new_P is not None else molecule.P
+        self.new_F = new_F if new_F is not None else molecule.F
 
         self.dH = 0
 
         if self.current_T != self.new_T:
-            self.dH += molecule.temp_change(new_T)
+            self.dH += molecule.temp_change(self.new_T)
         
         if self.current_F != self.new_F:
             self.dH += molecule.phase_change(new_F)
@@ -201,6 +226,8 @@ class Path:
     def build_path(self):
         # Go to Tmelt and Phase Change to Liquid
         if self.molecule.F in ['c', 's'] and self.end_F in ['l', 'g']:
+            if not self.molecule.has_cp('l'):
+                raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tm [°C]']))
             self.add_step(Step(self.molecule, new_F = 'l'))
 
@@ -211,6 +238,8 @@ class Path:
 
         # Go to Tvap and Phase Change to Liquid if Ending in Solid
         if self.molecule.F == 'g' and self.end_F in ['c', 's']:
+            if not self.molecule.has_cp('l'):
+                raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tb [°C]']))
             self.add_step(Step(self.molecule, new_F = 'l'))
 
@@ -218,8 +247,12 @@ class Path:
         if {self.molecule.F, self.end_F} == {'l', 'g'}:
             self.add_step(Step(self.molecule, new_T = self.molecule.Table_B1['Tb [°C]']))
             if self.molecule.F == 'l' and self.end_F == 'g':
+                if not self.molecule.has_cp('g'):
+                    raise ValueError(f"No Cp defined for {self.molecule.name} in gas phase.")
                 self.add_step(Step(self.molecule, new_F='g'))
             elif self.molecule.F == 'g' and self.end_F == 'l':
+                if not self.molecule.has_cp('l'):
+                    raise ValueError(f"No Cp defined for {self.molecule.name} in liquid phase.")
                 self.add_step(Step(self.molecule, new_F='l'))
     
         # Final Temp Change
@@ -228,14 +261,17 @@ class Path:
 
 
 
+
 ### STREAMLIT ###
 
 import streamlit as st
-import streamlit.components.v1 as components
-
+st.set_page_config(layout="wide")
 st.title("Hypothetical Path Builder")
 
-all_molecules = np.array(Table_B2["Formule"])
+
+b2_formule = np.array(Table_B2["Formule"])
+b1_formule = np.array(Table_B1["Formule"])
+all_molecules = np.unique(np.concatenate([b1_formule, b2_formule]))
 
 name = st.selectbox("Molecule", all_molecules)
 T_start = st.number_input("Start Temperature (°C)", value=25)
@@ -272,6 +308,7 @@ def get_step_label(step, Table_B2):
         c_raw = row['c (•10^8)']
         d_raw = row['d (•10^12)']
         
+
 
         if vorm == 1:
             cp_str = f"{a_raw}·10⁻³ + {b_raw}·10⁻⁵T + {c_raw}·10⁻⁸T² + {d_raw}·10⁻¹²T³"
@@ -406,7 +443,7 @@ if st.button("Calculate Path"):
 
         if path.steps:
             html = build_diagram_html(name, path.steps)
-            components.html(html, height=220, scrolling=True)
+            st.iframe(html, height = 220)
 
             st.subheader("Step breakdown")
             for i, step in enumerate(path.steps):
@@ -426,3 +463,4 @@ if st.button("Calculate Path"):
 
     except ValueError as e:
         st.error(str(e))
+
