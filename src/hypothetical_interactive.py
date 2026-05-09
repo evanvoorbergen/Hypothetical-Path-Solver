@@ -287,16 +287,16 @@ st.title("Hypothetical Path Builder")
 search_by = st.radio("Search by", ["Name (EN)", "Formula", "Name (NL)"], horizontal=True)
 
 if search_by == "Name (NL)":
-    b1_options = Table_B1["Stofnaam (NL)"]
-    b2_options = Table_B2["Stofnaam (NL)"]
+    b1_options = set(Table_B1["Stofnaam (NL)"].replace("0", np.nan).dropna())
+    b2_options = set(Table_B2["Stofnaam (NL)"].replace("0", np.nan).dropna())
 elif search_by == "Name (EN)":
-    b1_options = Table_B1["Stofnaam (EN)"]
-    b2_options = Table_B2["Stofnaam (EN)"]
+    b1_options = set(Table_B1["Stofnaam (EN)"].replace("0", np.nan).dropna())
+    b2_options = set(Table_B2["Stofnaam (EN)"].replace("0", np.nan).dropna())
 else:
-    b1_options = Table_B1["Formule"]
-    b2_options = Table_B2["Formule"]
+    b1_options = set(Table_B1["Formule"].replace("0", np.nan).dropna())
+    b2_options = set(Table_B2["Formule"].replace("0", np.nan).dropna())
 
-options = np.sort(pd.concat([b1_options, b2_options]).replace("0", np.nan).dropna().unique())
+options = np.sort(list(b1_options & b2_options))
 name = st.selectbox("Molecule", options)
 
 T_start = st.number_input("Start Temperature (°C)", value=25)
