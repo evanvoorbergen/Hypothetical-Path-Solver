@@ -256,7 +256,11 @@ class Path:
                 self.add_step(Step(self.molecule, new_F='l'))
     
         # Final Temp Change
-        if self.molecule.F == self.end_F and self.molecule.T != self.end_T:
+        solid = ['s', 'c']
+        same_phase = (self.molecule.F == self.end_F) or \
+                    (self.molecule.F in solid and self.end_F in solid)
+
+        if same_phase and self.molecule.T != self.end_T:
             self.add_step(Step(self.molecule, new_T = self.end_T))
 
 
